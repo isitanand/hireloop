@@ -14,11 +14,18 @@ from __future__ import annotations
 
 import base64
 import os
+import time
 from typing import Any
 
 import requests
 
 TIMEOUT = 120
+# Status codes worth a short retry: rate limits and "busy right now" errors
+# that are usually gone a couple seconds later, as opposed to a real auth or
+# request-shape problem that retrying will never fix.
+RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2.0
 
 
 class LLMError(RuntimeError):
@@ -92,28 +99,39 @@ class AnthropicProvider(Provider):
                  json_mode: bool = False) -> str:
         # No native JSON switch needed here — the prompts already specify the
         # shape and Claude honours it. json_mode is accepted and ignored.
-        msg = self._client().messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
+        client = self._client()
+        try:
+            msg = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+        except Exception as e:  # anthropic.APIError and friends - never let
+            # a raw SDK exception escape uncaught, or a caller expecting
+            # only LLMError (every other provider's contract) gets a crash
+            # instead of a clean, catchable error.
+            raise LLMError(f"anthropic error: {type(e).__name__}: {e}") from e
         return self._text(msg)
 
     def complete_document(self, model: str, prompt: str, pdf: bytes,
                           max_tokens: int) -> str:
-        msg = self._client().messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": [
-                {"type": "document", "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": base64.b64encode(pdf).decode(),
-                }},
-                {"type": "text", "text": prompt},
-            ]}],
-        )
+        client = self._client()
+        try:
+            msg = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": [
+                    {"type": "document", "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": base64.b64encode(pdf).decode(),
+                    }},
+                    {"type": "text", "text": prompt},
+                ]}],
+            )
+        except Exception as e:
+            raise LLMError(f"anthropic error: {type(e).__name__}: {e}") from e
         return self._text(msg)
 
 
@@ -125,12 +143,22 @@ class GeminiProvider(Provider):
     BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
     def _post(self, model: str, body: dict) -> str:
-        r = requests.post(
-            f"{self.BASE}/{model}:generateContent",
-            params={"key": self._env("GEMINI_API_KEY")},
-            json=body,
-            timeout=TIMEOUT,
-        )
+        r = None
+        for attempt in range(RETRY_ATTEMPTS):
+            r = requests.post(
+                f"{self.BASE}/{model}:generateContent",
+                params={"key": self._env("GEMINI_API_KEY")},
+                json=body,
+                timeout=TIMEOUT,
+            )
+            if r.status_code == 200 or r.status_code not in RETRYABLE_STATUS:
+                break
+            if attempt < RETRY_ATTEMPTS - 1:
+                # "high demand"/rate-limit errors are usually gone within a
+                # few seconds - a short retry here means one busy moment on
+                # Google's side doesn't sacrifice a whole screen batch (and
+                # the jobs in it) to a single unlucky request.
+                time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
         if r.status_code != 200:
             raise LLMError(f"gemini HTTP {r.status_code}: {r.text[:300]}")
         try:
@@ -257,7 +285,7 @@ PROVIDERS = {
 # after setting nothing but a key.
 DEFAULT_MODELS = {
     "anthropic": {"screen": "claude-haiku-4-5-20251001", "draft": "claude-sonnet-5"},
-    "gemini": {"screen": "gemini-2.0-flash", "draft": "gemini-2.0-flash"},
+    "gemini": {"screen": "gemini-3.6-flash", "draft": "gemini-3.6-flash"},
     "groq": {"screen": "llama-3.3-70b-versatile", "draft": "llama-3.3-70b-versatile"},
     "openai-compatible": {"screen": "gpt-4o-mini", "draft": "gpt-4o"},
     "ollama": {"screen": "llama3.1", "draft": "llama3.1"},
@@ -293,3 +321,12 @@ def resolve(stage: str, check: bool = True) -> tuple[Provider, str]:
     if check:
         provider.preflight()
     return provider, model
+
+
+def resolve_fallback_model(stage: str) -> str | None:
+    """An optional second model, same provider, to retry with if the primary
+    model's own retries (see GeminiProvider._post) are exhausted - e.g. a
+    persistently overloaded model where a sibling model on the same account
+    is not. Unset by default; opt in with SCREEN_FALLBACK_MODEL /
+    DRAFT_FALLBACK_MODEL."""
+    return (os.getenv(f"{stage.upper()}_FALLBACK_MODEL") or "").strip() or None

@@ -144,11 +144,17 @@ concrete about the deciding factor."""
 
 
 def screen(jobs: list[Job], profile: dict, batch_size: int = 8, jd_chars: int = 1400,
-           provider: Provider | None = None, model: str | None = None) -> list[Job]:
+           provider: Provider | None = None, model: str | None = None,
+           fallback_model: str | None = None) -> list[Job]:
     """Stage 1: score every surviving job. Mutates and returns `jobs`.
 
     A batch that fails to parse logs a warning and is skipped — one bad reply
-    must not take down the whole run.
+    must not take down the whole run. If `fallback_model` is given (same
+    provider, e.g. SCREEN_FALLBACK_MODEL), a batch that fails on the primary
+    model gets one more attempt on the fallback before being skipped - the
+    primary model's own transient-error retries (see providers.py) already
+    happened by the time an LLMError reaches here, so this is for a model
+    that is down/overloaded for longer than a few seconds.
     """
     if provider is None or model is None:
         provider, model = resolve("screen")
@@ -166,20 +172,30 @@ def screen(jobs: list[Job], profile: dict, batch_size: int = 8, jd_chars: int = 
         } for j in batch]
 
         n = start // batch_size + 1
-        try:
-            raw = provider.complete(
-                model, SCREEN_SYSTEM,
-                f"CANDIDATE PROFILE:\n{profile_blob}\n\n"
-                f"JOBS:\n{json.dumps(payload, ensure_ascii=False)}",
-                SCREEN_MAX_TOKENS, json_mode=True,
-            )
-            results = {}
-            for r in _as_list(parse_json(raw)):
-                jid = r.get("job_id")
-                if jid:
-                    results[str(jid)] = r
-        except (LLMError, ValueError, KeyError, TypeError) as e:
-            print(f"  ! screen batch {n} failed ({type(e).__name__}: {e}) — skipping")
+        user_msg = (
+            f"CANDIDATE PROFILE:\n{profile_blob}\n\n"
+            f"JOBS:\n{json.dumps(payload, ensure_ascii=False)}"
+        )
+        models_to_try = [model] + ([fallback_model] if fallback_model else [])
+        results = None
+        last_err: Exception | None = None
+        for attempt_model in models_to_try:
+            try:
+                raw = provider.complete(
+                    attempt_model, SCREEN_SYSTEM, user_msg, SCREEN_MAX_TOKENS, json_mode=True,
+                )
+                parsed = {}
+                for r in _as_list(parse_json(raw)):
+                    jid = r.get("job_id")
+                    if jid:
+                        parsed[str(jid)] = r
+                results = parsed  # only commit once parsing fully succeeded
+                break
+            except (LLMError, ValueError, KeyError, TypeError) as e:
+                last_err = e
+                continue
+        if results is None:
+            print(f"  ! screen batch {n} failed ({type(last_err).__name__}: {last_err}) — skipping")
             continue
 
         for j in batch:
@@ -221,24 +237,39 @@ Return ONLY a JSON object, no prose:
 
 
 def draft(jobs: list[Job], profile: dict, jd_chars: int = 6000,
-          provider: Provider | None = None, model: str | None = None) -> list[Job]:
-    """Stage 2: full kit for the shortlist. One call per job, best model."""
+          provider: Provider | None = None, model: str | None = None,
+          fallback_model: str | None = None) -> list[Job]:
+    """Stage 2: full kit for the shortlist. One call per job, best model.
+
+    Same fallback-model behaviour as `screen()` above (DRAFT_FALLBACK_MODEL).
+    """
     if provider is None or model is None:
         provider, model = resolve("draft")
     profile_blob = json.dumps(profile, ensure_ascii=False)
+    models_to_try = [model] + ([fallback_model] if fallback_model else [])
 
     for j in jobs:
-        try:
-            raw = provider.complete(
-                model, DRAFT_SYSTEM,
-                f"CANDIDATE PROFILE:\n{profile_blob}\n\n"
-                f"JOB: {j.title} at {j.company} ({j.location or 'location not stated'})\n"
-                f"URL: {j.url}\n\n{j.description[:jd_chars]}",
-                DRAFT_MAX_TOKENS, json_mode=True,
-            )
-            kit = parse_json(raw)
-            if not isinstance(kit, dict):
-                raise ValueError("draft did not return a JSON object")
+        kit = None
+        last_err: Exception | None = None
+        for attempt_model in models_to_try:
+            try:
+                raw = provider.complete(
+                    attempt_model, DRAFT_SYSTEM,
+                    f"CANDIDATE PROFILE:\n{profile_blob}\n\n"
+                    f"JOB: {j.title} at {j.company} ({j.location or 'location not stated'})\n"
+                    f"URL: {j.url}\n\n{j.description[:jd_chars]}",
+                    DRAFT_MAX_TOKENS, json_mode=True,
+                )
+                parsed = parse_json(raw)
+                if not isinstance(parsed, dict):
+                    raise ValueError("draft did not return a JSON object")
+                kit = parsed
+                break
+            except (LLMError, ValueError, KeyError, TypeError) as e:
+                last_err = e
+                continue
+
+        if kit is not None:
             # Normalise so the digest template never has to guess.
             j.draft = {
                 "fit_summary": str(kit.get("fit_summary") or ""),
@@ -248,8 +279,8 @@ def draft(jobs: list[Job], profile: dict, jd_chars: int = 6000,
                 "questions_to_ask": [str(q) for q in (kit.get("questions_to_ask") or [])],
             }
             print(f"  drafted {j.title} @ {j.company}")
-        except (LLMError, ValueError, KeyError, TypeError) as e:
-            print(f"  ! draft failed for {j.job_id} ({type(e).__name__}: {e})")
+        else:
+            print(f"  ! draft failed for {j.job_id} ({type(last_err).__name__}: {last_err})")
             j.draft = {k: ("" if k in ("fit_summary", "cover_note") else []) for k in DRAFT_KEYS}
 
     return jobs

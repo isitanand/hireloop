@@ -1,0 +1,33 @@
+# Web framework
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.12   # form/file uploads (resume upload endpoint)
+
+# Settings / validation
+pydantic>=2.9
+pydantic-settings>=2.6
+email-validator>=2.2
+
+# Database
+sqlalchemy>=2.0
+# Only exercised when DATABASE_URL points at Postgres (production - see
+# docs/DEPLOYMENT.md); SQLite, the local/default DB, needs nothing extra,
+# it's in the stdlib. Installed unconditionally so switching DATABASE_URL
+# doesn't also require a redeploy with a changed requirements.txt.
+psycopg2-binary>=2.9
+
+# Auth
+python-jose[cryptography]>=3.3
+passlib[bcrypt]>=1.7
+bcrypt==4.0.1                # pinned: passlib 1.7's bcrypt backend reads bcrypt.__about__,
+                              # which bcrypt >=4.1 removed - newer versions log a harmless
+                              # but noisy "(trapped) error reading bcrypt version" warning
+
+# The existing jobhunt pipeline package (fetch/prefilter/providers/llm/digest/mailer)
+requests>=2.31
+PyYAML>=6.0
+anthropic>=0.40
+
+# Tests
+pytest>=8.0
+httpx>=0.27                 # required by FastAPI's TestClient

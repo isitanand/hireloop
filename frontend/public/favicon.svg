@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <style>
+    .bg-stop-1 { stop-color: #4c56e0; }
+    .bg-stop-2 { stop-color: #ff7a4d; }
+    .mark { stroke: #f7f7f4; }
+    @media (prefers-color-scheme: dark) {
+      .bg-stop-1 { stop-color: #7c9cff; }
+      .bg-stop-2 { stop-color: #ff9466; }
+      .mark { stroke: #0a0b10; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="g" x1="5%" y1="0%" x2="95%" y2="100%">
+      <stop offset="0%" class="bg-stop-1" />
+      <stop offset="100%" class="bg-stop-2" />
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="15" fill="url(#g)" />
+  <circle cx="19" cy="24" r="11.2" fill="none" class="mark" stroke-width="3.8" />
+  <circle cx="29" cy="24" r="11.2" fill="none" class="mark" stroke-width="3.8" />
+</svg>

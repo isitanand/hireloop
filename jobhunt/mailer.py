@@ -6,12 +6,14 @@ import smtplib
 from email.message import EmailMessage
 
 
-def send(subject: str, html_body: str) -> None:
+def send(subject: str, html_body: str, to_addr: str | None = None) -> None:
+    """`to_addr` overrides MAIL_TO - the backend passes each user's own
+    address here since one deployment now serves many recipients."""
     host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     port = int(os.getenv("SMTP_PORT", "587"))
     user = os.environ["SMTP_USER"]
     password = os.environ["SMTP_PASS"]
-    to_addr = os.getenv("MAIL_TO", user)
+    to_addr = to_addr or os.getenv("MAIL_TO", user)
 
     msg = EmailMessage()
     msg["Subject"] = subject

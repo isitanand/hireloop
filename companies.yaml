@@ -23,16 +23,35 @@
 # noise and makes the prefilter counts impossible to reason about.
 
 companies:
-  - {ats: greenhouse, slug: stripe,      name: Stripe}
-  - {ats: greenhouse, slug: databricks,  name: Databricks}
-  - {ats: greenhouse, slug: cloudflare,  name: Cloudflare}
-  - {ats: greenhouse, slug: figma,       name: Figma}
-  - {ats: greenhouse, slug: dropbox,     name: Dropbox}
-  - {ats: greenhouse, slug: coinbase,    name: Coinbase}
-  - {ats: greenhouse, slug: reddit,      name: Reddit}
-  - {ats: lever,      slug: voleon,      name: Voleon}
+  - { ats: greenhouse, slug: truecaller, name: Truecaller }
+  # phonepe (greenhouse) went dead (404) as of 2026-09 - removed, not just
+  # left in, since a slug this stale would sit at 0 jobs forever otherwise.
+  - { ats: greenhouse, slug: make, name: Make }
+  - { ats: greenhouse, slug: singlestore, name: SingleStore }
+  - { ats: greenhouse, slug: toast, name: Toast }
+  - { ats: greenhouse, slug: atomicwork, name: Atomicwork }
+  - { ats: greenhouse, slug: bswiftindia, name: bswift India }
+  - { ats: greenhouse, slug: getwellnetwork, name: Get Well Network }
+  - { ats: lever, slug: levelai, name: Level AI }
+  - { ats: lever, slug: stable-money1, name: Stable Money }
+  - { ats: lever, slug: veeva, name: Veeva Systems }
+  - { ats: lever, slug: coupa, name: Coupa Software }
+  - { ats: ashby, slug: bespokelabs, name: Bespoke Labs }
+  - { ats: ashby, slug: ema, name: Ema }
+  - { ats: ashby, slug: granica, name: Granica }
 
-  - {ats: ashby,      slug: openai,      name: OpenAI}
-  - {ats: ashby,      slug: ramp,        name: Ramp}
-  - {ats: ashby,      slug: linear,      name: Linear}
-  - {ats: ashby,      slug: vanta,       name: Vanta}
+  # Added 2026-09 - bigger boards with a meaningfully large number of
+  # India-located or genuinely remote-eligible postings (verified live
+  # against each ATS API before adding, not guessed).
+  - { ats: greenhouse, slug: stripe, name: Stripe }
+  - { ats: greenhouse, slug: databricks, name: Databricks }
+  - { ats: greenhouse, slug: gitlab, name: GitLab }
+  - { ats: greenhouse, slug: coinbase, name: Coinbase }
+  - { ats: greenhouse, slug: reddit, name: Reddit }
+  - { ats: greenhouse, slug: postman, name: Postman }
+  - { ats: greenhouse, slug: groww, name: Groww }
+  - { ats: greenhouse, slug: newrelic, name: New Relic }
+  - { ats: greenhouse, slug: discord, name: Discord }
+  - { ats: lever, slug: ro, name: Ro }
+  - { ats: ashby, slug: cursor, name: Cursor }
+  - { ats: ashby, slug: replit, name: Replit }

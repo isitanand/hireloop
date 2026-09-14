@@ -1,20 +1,22 @@
 # secrets
 .env
+.env.local
 
-# your actual resume and the profile derived from it
+# your actual resume and the profile derived from it (CLI-only artifacts)
 resume.*
 my_resume.pdf
 profile.json
 !profile.example.json
-# generated output
+
+# CLI-generated output
 out/
-*.html
+/*.html
 !jobhunt/templates/*.html
 
-# Your dedupe index and application tracker. Personal, and it must never ship
-# with the repo: a cloned seen.json marks every job as already-seen, so a new
-# user's first run finds nothing. GitHub Actions persists it via actions/cache
-# instead of committing it.
+# Your dedupe index and application tracker (CLI). Personal, and it must
+# never ship with the repo: a cloned seen.json marks every job as
+# already-seen, so a new user's first run finds nothing. GitHub Actions
+# persists it via actions/cache instead of committing it.
 seen.json
 
 # python
@@ -26,6 +28,14 @@ env/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+
+# backend runtime data - sqlite DB + uploaded resumes, personal like seen.json
+backend/data/
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
 
 # editors / os
 .vscode/
