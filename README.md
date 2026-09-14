@@ -1,4 +1,4 @@
-# jobhunt — AI job recommendation & application assistant
+# HireLoop — AI job recommendation & application assistant
 
 A full-stack web app that reads public job boards every day, throws away
 the ~99% of postings that don't fit a candidate, scores what's left
