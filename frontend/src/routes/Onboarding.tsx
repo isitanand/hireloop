@@ -99,31 +99,40 @@ export default function Onboarding() {
         {step === "resume" && (
           <div className="panel p-8 text-center">
             <div className="h-12 w-12 rounded-2xl bg-accent/10 text-accent flex items-center justify-center text-xl mx-auto mb-4">
-              <IconUpload />
+              {uploadMutation.isPending ? (
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+              ) : (
+                <IconUpload />
+              )}
             </div>
-            <h1 className="font-display text-lg font-semibold text-text">Let's build your profile</h1>
+            <h1 className="font-display text-lg font-semibold text-text">
+              {uploadMutation.isPending ? "Parsing your resume…" : "Let's build your profile"}
+            </h1>
             <p className="text-sm text-muted mt-2 leading-relaxed">
-              Upload your resume and AI will extract your skills, experience and target roles.
-              Having trouble? You can fill it in by hand instead — it works exactly the same either way.
+              {uploadMutation.isPending
+                ? "AI is reading your resume and pulling out your skills, experience and target roles. This can take up to a minute for longer resumes — hang tight."
+                : "Upload your resume and AI will extract your skills, experience and target roles. Having trouble? You can fill it in by hand instead — it works exactly the same either way."}
             </p>
-            <div className="mt-6 flex flex-col items-center gap-3">
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".pdf,.txt,.md"
-                className="hidden"
-                onChange={handleFile}
-              />
-              <Button onClick={() => fileRef.current?.click()} loading={uploadMutation.isPending}>
-                Upload resume (.pdf, .txt, .md)
-              </Button>
-              <button
-                onClick={() => setStep("profile")}
-                className="text-sm text-muted hover:text-text underline underline-offset-2"
-              >
-                Skip — fill in manually
-              </button>
-            </div>
+            {!uploadMutation.isPending && (
+              <div className="mt-6 flex flex-col items-center gap-3">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".pdf,.txt,.md"
+                  className="hidden"
+                  onChange={handleFile}
+                />
+                <Button onClick={() => fileRef.current?.click()}>
+                  Upload resume (.pdf, .txt, .md)
+                </Button>
+                <button
+                  onClick={() => setStep("profile")}
+                  className="text-sm text-muted hover:text-text underline underline-offset-2"
+                >
+                  Skip — fill in manually
+                </button>
+              </div>
+            )}
           </div>
         )}
 
