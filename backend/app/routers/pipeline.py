@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -9,6 +11,16 @@ from ..deps import get_current_user, get_db
 from ..services.pipeline_service import run_pipeline_for_user
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
+
+# A run has no heartbeat - if the process hosting its background task dies
+# mid-run (a Render redeploy, an OOM kill, a crash), nothing ever moves its
+# row past status="running". Without this, that one row blocks every future
+# run for the user forever: this endpoint 409s while `already_running`
+# exists, and the dashboard's "Run search now" button stays disabled/spinning
+# on any run whose latest status is "running". A real run's stage keeps
+# advancing every commit (see pipeline_service.py); one untouched for this
+# long is abandoned, not slow.
+STALE_RUN_AFTER = timedelta(minutes=15)
 
 
 def _run_in_background(user_id: int, run_log_id: int, scorer: str, send_email: bool) -> None:
@@ -39,7 +51,19 @@ def start_run(
         .first()
     )
     if already_running:
-        raise HTTPException(status_code=409, detail="a run is already in progress")
+        started = already_running.started_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - started < STALE_RUN_AFTER:
+            raise HTTPException(status_code=409, detail="a run is already in progress")
+        already_running.status = "failed"
+        already_running.stage = "failed"
+        already_running.error = (
+            "abandoned - no progress for over 15 minutes, likely a server "
+            "restart mid-run"
+        )
+        already_running.finished_at = datetime.now(timezone.utc)
+        db.commit()
 
     run_log = models.RunLog(user_id=user.id, status="running", scorer=body.scorer)
     db.add(run_log)
