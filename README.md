@@ -16,7 +16,7 @@ submit themselves.
                      (free, no AI)
 ```
 *(a real run against the 15 companies in this repo's example
-`companies.yaml` — see [research/paper1_resume_job_matching.md](research/paper1_resume_job_matching.md), Section VI)*
+`companies.yaml`)*
 
 <p align="center">
   <img src="docs/screenshots/landing.png" width="32%" alt="Landing page" />
@@ -30,7 +30,7 @@ submit themselves.
 
 | | |
 |---|---|
-| **Multi-user** | Every student gets their own account, resume, filters, and tracker |
+| **Multi-user** | Every user gets their own account, resume, filters, and tracker |
 | **AI-powered** | A two-stage LLM pipeline — cheap screening over everything, an expensive draft only for the shortlist — swappable across 5 providers (Claude, Gemini, Groq, any OpenAI-compatible endpoint, or fully local Ollama) |
 | **Zero-key demo mode** | A keyword-overlap stub scores jobs with no API key at all, so the whole product is explorable without spending anything |
 | **Real data sources** | Public, documented ATS APIs — Greenhouse, Lever, Ashby. No LinkedIn/Naukri scraping (no public API, against ToS) |
@@ -43,19 +43,6 @@ top of the same, unmodified pipeline package. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the two fit together
 and why the job-fetching layer is shared across users while the ranking
 stays personal.
-
-## Research
-
-Two papers documenting the system's design, written against real,
-citable literature — not a project write-up, an actual literature survey
-and system description with reproducible numbers pulled from this
-repository's own test suite and live runs:
-
-- [**A Hybrid Deterministic–LLM Pipeline for Resume-to-Job Matching**](research/paper1_resume_job_matching.md) — the fetch → prefilter → screen architecture, the specific bugs a naive implementation hits (regex substring mismatches, epoch-millisecond timestamps), and funnel statistics from a live run.
-- [**Hybrid AI Screening and Personalized Application Drafting**](research/paper2_hybrid_ai_screening_drafting.md) — the two-stage cost design, anti-hallucination prompting, provider-agnostic architecture, and why the system never auto-submits.
-
-Both need your names/college filled in before submission — see the note
-at the top of each file.
 
 ## Quickstart
 
@@ -109,7 +96,6 @@ backend/       FastAPI app wrapping jobhunt/ - auth, per-user profiles/
                filters/companies, a shared job cache, the tracker.
 frontend/      React dashboard - onboarding, shortlist, job detail,
                tracker, settings.
-research/      the two papers described above.
 docs/          ARCHITECTURE.md, DEPLOYMENT.md, CLI.md, screenshots/.
 tests/         63 tests for jobhunt/ - no network, no API key.
 backend/tests/ 28 tests for the API - same no-network philosophy.
