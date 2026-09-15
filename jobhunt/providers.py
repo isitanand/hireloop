@@ -214,6 +214,10 @@ class OpenAICompatProvider(Provider):
     required_env = "GROQ_API_KEY"
     default_base = "https://api.groq.com/openai/v1"
     key_env = "GROQ_API_KEY"
+    # Extra top-level body fields merged into every request - a subclass hook
+    # for provider-specific quirks (see NvidiaProvider) without duplicating
+    # the whole method.
+    extra_body: dict[str, Any] = {}
 
     def complete(self, model: str, system: str, user: str, max_tokens: int,
                  json_mode: bool = False) -> str:
@@ -221,7 +225,8 @@ class OpenAICompatProvider(Provider):
         messages = ([{"role": "system", "content": system}] if system else []) + \
                    [{"role": "user", "content": user}]
         payload: dict[str, Any] = {"model": model, "messages": messages,
-                                   "max_tokens": max_tokens, "temperature": 0.2}
+                                   "max_tokens": max_tokens, "temperature": 0.2,
+                                   **self.extra_body}
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         r = requests.post(
@@ -240,6 +245,25 @@ class OpenAICompatProvider(Provider):
 
 class GroqProvider(OpenAICompatProvider):
     name = "groq"
+
+
+class NvidiaProvider(OpenAICompatProvider):
+    """NVIDIA NIM (build.nvidia.com) - same /chat/completions shape as Groq,
+    just a different host and key. Its own subclass (rather than pointing
+    the generic openai-compatible provider at it via LLM_BASE_URL) so the
+    key lives in NVIDIA_API_KEY instead of overloading GROQ_API_KEY."""
+
+    name = "nvidia"
+    required_env = "NVIDIA_API_KEY"
+    default_base = "https://integrate.api.nvidia.com/v1"
+    key_env = "NVIDIA_API_KEY"
+    # NVIDIA's Nemotron models default to "thinking" mode - they prepend a
+    # chain-of-thought preamble as plain prose ahead of the actual reply, in
+    # `content` itself rather than a separate field, which breaks JSON
+    # parsing even with response_format=json_object set. Confirmed live
+    # against the API: disabling it here is what makes screen/draft's JSON
+    # replies parse cleanly.
+    extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 class OllamaProvider(Provider):
@@ -277,6 +301,7 @@ PROVIDERS = {
     "anthropic": AnthropicProvider,
     "gemini": GeminiProvider,
     "groq": GroqProvider,
+    "nvidia": NvidiaProvider,
     "openai-compatible": OpenAICompatProvider,
     "ollama": OllamaProvider,
 }
@@ -287,6 +312,10 @@ DEFAULT_MODELS = {
     "anthropic": {"screen": "claude-haiku-4-5-20251001", "draft": "claude-sonnet-5"},
     "gemini": {"screen": "gemini-3.6-flash", "draft": "gemini-3.6-flash"},
     "groq": {"screen": "llama-3.3-70b-versatile", "draft": "llama-3.3-70b-versatile"},
+    # Screening is many calls/run - the fast MoE model. Drafting is a
+    # handful of calls for the actual cover-note text, where the bigger
+    # model's reasoning is worth the extra latency.
+    "nvidia": {"screen": "nvidia/nemotron-3.5-lightning-30b-a3b", "draft": "nvidia/nemotron-3-super-120b-a12b"},
     "openai-compatible": {"screen": "gpt-4o-mini", "draft": "gpt-4o"},
     "ollama": {"screen": "llama3.1", "draft": "llama3.1"},
 }
