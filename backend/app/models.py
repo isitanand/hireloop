@@ -123,11 +123,17 @@ class Job(Base):
     ats: Mapped[str] = mapped_column(String(20), nullable=False)
     company: Mapped[str] = mapped_column(String(255), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    location: Mapped[str] = mapped_column(String(255), default="")
+    # Both come from free-text ATS fields with no length cap on the source
+    # side - Greenhouse concatenates every office into one `location.name`
+    # string, and Ashby's `compensationTierSummary` can be a paragraph. A
+    # 255-char VARCHAR was fine against SQLite locally (which never enforces
+    # column length), then threw StringDataRightTruncation the first time a
+    # real large-company posting hit Postgres in production.
+    location: Mapped[str] = mapped_column(Text, default="")
     url: Mapped[str] = mapped_column(String(1000), default="")
     description: Mapped[str] = mapped_column(Text, default="")
     posted_at: Mapped[str | None] = mapped_column(String(50))
-    salary: Mapped[str | None] = mapped_column(String(255))
+    salary: Mapped[str | None] = mapped_column(Text)
     first_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
