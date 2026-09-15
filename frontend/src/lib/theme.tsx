@@ -3,10 +3,6 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 type Theme = "light" | "dark";
 const STORAGE_KEY = "jobhunt_theme";
 
-function systemTheme(): Theme {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
 interface ThemeCtx {
   theme: Theme;
   toggle: () => void;
@@ -16,7 +12,7 @@ const Ctx = createContext<ThemeCtx | null>(null);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored === "light" || stored === "dark" ? stored : systemTheme();
+    return stored === "light" || stored === "dark" ? stored : "light";
   });
 
   useEffect(() => {
