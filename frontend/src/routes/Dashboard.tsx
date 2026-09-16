@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import ActivityChart from "../components/ActivityChart";
 import Button from "../components/Button";
 import EmptyState from "../components/EmptyState";
-import FunnelStats from "../components/FunnelStats";
+import FunnelStats, { STAGE_MESSAGE } from "../components/FunnelStats";
 import { IconCheck, IconRun, IconSpark, IconTrack, IconX } from "../components/icons";
 import JobCard from "../components/JobCard";
 import Spinner from "../components/Spinner";
@@ -141,6 +141,11 @@ export default function Dashboard() {
 
   const hasProfile = !profileQuery.isError;
   const firstName = user?.name?.split(" ")[0];
+  // latestRun is whatever ran last, finished or not - only treat it as the
+  // live one when it's actually still going, or a just-finished run's "done"
+  // stage would narrate a run that isn't happening.
+  const activeRun = latestRun?.status === "running" ? latestRun : null;
+  const isRunning = runMutation.isPending || Boolean(activeRun);
 
   const donutSlices = [
     { name: "Shortlisted", value: statsQuery.data?.shortlisted ?? 0, color: "#4c56e0" },
@@ -188,6 +193,32 @@ export default function Dashboard() {
       )}
 
       {runNotice && <p className="text-sm text-accent font-medium">{runNotice}</p>}
+
+      {/* The funnel panel further down already narrates the running stage, but
+          it sits below the stat cards and both charts - click "Run search now"
+          and the only feedback above the fold was the button's own spinner,
+          which reads as "nothing happened" on a run that legitimately takes
+          minutes. Say it where the click happened. */}
+      {isRunning && (
+        <div className="panel p-4 flex items-start gap-3">
+          <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-text">
+              Search running — {activeRun
+                ? STAGE_MESSAGE[activeRun.stage]?.(activeRun) ?? "Working…"
+                : "Starting up…"}
+            </p>
+            <p className="text-sm text-muted mt-1 leading-relaxed">
+              A first scan reads every job board from scratch and scores each posting
+              against your resume, so it usually takes a few minutes. It keeps running
+              on the server — you can leave this page and come back to it.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid sm:grid-cols-4 gap-4">
         <StatCard

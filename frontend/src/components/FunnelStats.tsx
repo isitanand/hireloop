@@ -10,7 +10,7 @@ const STAGES: { key: keyof RunLog; label: string }[] = [
 // What's actually happening at each stage, in plain language - this is
 // what tells a real user "still working," not "stuck," while a run with
 // real AI calls can easily take 30-60+ seconds.
-const STAGE_MESSAGE: Record<RunStage, (run: RunLog) => string> = {
+export const STAGE_MESSAGE: Record<RunStage, (run: RunLog) => string> = {
   starting: () => "Starting up…",
   fetching: () => "Fetching postings from your selected companies…",
   filtering: (r) => `Filtering ${r.scanned || "the"} postings by title, location and freshness…`,
