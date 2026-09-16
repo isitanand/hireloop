@@ -144,14 +144,25 @@ class GeminiProvider(Provider):
 
     def _post(self, model: str, body: dict) -> str:
         r = None
+        network_err: Exception | None = None
         for attempt in range(RETRY_ATTEMPTS):
-            r = requests.post(
-                f"{self.BASE}/{model}:generateContent",
-                params={"key": self._env("GEMINI_API_KEY")},
-                json=body,
-                timeout=TIMEOUT,
-            )
-            if r.status_code == 200 or r.status_code not in RETRYABLE_STATUS:
+            try:
+                r = requests.post(
+                    f"{self.BASE}/{model}:generateContent",
+                    params={"key": self._env("GEMINI_API_KEY")},
+                    json=body,
+                    timeout=TIMEOUT,
+                )
+                network_err = None
+            except requests.RequestException as e:
+                # A timeout/connection-reset here is exactly as retryable as
+                # a 503 below, but requests raises instead of returning a
+                # status code - previously this escaped uncaught past this
+                # whole function, past screen()/draft()'s per-batch/per-job
+                # try/except (which only catches LLMError), and killed the
+                # *entire run* instead of just this one batch.
+                r, network_err = None, e
+            if r is not None and (r.status_code == 200 or r.status_code not in RETRYABLE_STATUS):
                 break
             if attempt < RETRY_ATTEMPTS - 1:
                 # "high demand"/rate-limit errors are usually gone within a
@@ -159,6 +170,8 @@ class GeminiProvider(Provider):
                 # Google's side doesn't sacrifice a whole screen batch (and
                 # the jobs in it) to a single unlucky request.
                 time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+        if r is None:
+            raise LLMError(f"gemini unreachable: {type(network_err).__name__}: {network_err}") from network_err
         if r.status_code != 200:
             raise LLMError(f"gemini HTTP {r.status_code}: {r.text[:300]}")
         try:
@@ -229,12 +242,21 @@ class OpenAICompatProvider(Provider):
                                    **self.extra_body}
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
-        r = requests.post(
-            f"{base}/chat/completions",
-            headers={"Authorization": f"Bearer {self._env(self.key_env)}"},
-            json=payload,
-            timeout=TIMEOUT,
-        )
+        try:
+            r = requests.post(
+                f"{base}/chat/completions",
+                headers={"Authorization": f"Bearer {self._env(self.key_env)}"},
+                json=payload,
+                timeout=TIMEOUT,
+            )
+        except requests.RequestException as e:
+            # Unlike a non-200 status (handled below), a timeout/connection
+            # error here raises instead of returning - previously this
+            # escaped uncaught past screen()/draft()'s per-batch/per-job
+            # try/except (which only catches LLMError) and killed the
+            # entire run instead of just this one batch. Seen live against
+            # NVIDIA's API.
+            raise LLMError(f"{self.name} unreachable: {type(e).__name__}: {e}") from e
         if r.status_code != 200:
             raise LLMError(f"{self.name} HTTP {r.status_code}: {r.text[:300]}")
         try:
