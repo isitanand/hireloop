@@ -137,10 +137,12 @@ work in.
 
 Do not inflate scores to be encouraging. Most postings are a 4.
 
-Return ONLY a JSON array, one object per job, no prose:
-[{"job_id": str, "score": number, "reason": str}]
-Echo `job_id` back exactly as given. `reason` is one sentence, max 20 words,
-concrete about the deciding factor."""
+Return ONLY a JSON object with this exact shape, no prose:
+{"jobs": [{"job_id": str, "score": number, "reason": str}, ...]}
+Include one entry for EVERY job_id you were given below - do not skip or
+omit any, even ones you are unsure about. Echo `job_id` back exactly as
+given. `reason` is one sentence, max 20 words, concrete about the
+deciding factor."""
 
 
 def screen(jobs: list[Job], profile: dict, batch_size: int = 8, jd_chars: int = 1400,
