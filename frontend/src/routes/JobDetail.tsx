@@ -131,7 +131,9 @@ export default function JobDetail() {
             <p className="text-sm text-muted mb-3">
               No application kit yet — {job.job_id.startsWith("manual:")
                 ? "this role was added by hand, so it never went through AI screening."
-                : "it scored below the AI drafting stage, or hasn't been screened yet."}
+                : job.status === "shortlisted"
+                  ? "drafting failed on the automatic run (a temporary AI hiccup) — click below to retry."
+                  : "it scored below the AI drafting stage, or hasn't been screened yet."}
             </p>
             <Button
               variant="secondary"
