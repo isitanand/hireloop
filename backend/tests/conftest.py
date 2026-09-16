@@ -23,6 +23,14 @@ os.environ["DATABASE_URL"] = f"sqlite:///{Path(_tmp_dir) / 'test.db'}"
 os.environ["JWT_SECRET"] = "test-secret"
 os.environ["ADMIN_RUN_SECRET"] = "test-admin-secret"
 os.environ["CORS_ORIGINS"] = "http://localhost:5173"
+# jobhunt.providers.resolve()'s preflight check is a cheap env-var presence
+# check, not a network call - but pipeline tests that monkeypatch
+# llm.screen/llm.draft directly still go through resolve("screen") first
+# (see app/services/pipeline_service.py), which raises LLMError and aborts
+# the whole run before anything gets persisted if no provider credentials
+# are set at all. Anthropic is the default provider (LLM_PROVIDER unset), so
+# a fake key here is what those tests actually need, not a real one.
+os.environ["ANTHROPIC_API_KEY"] = "test-anthropic-key"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
