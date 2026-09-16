@@ -197,6 +197,19 @@ def screen(jobs: list[Job], profile: dict, batch_size: int = 8, jd_chars: int = 
         if results is None:
             print(f"  ! screen batch {n} failed ({type(last_err).__name__}: {last_err}) — skipping")
             continue
+        # A batch can "succeed" - valid JSON, no exception - while still
+        # missing some of the job_ids it was asked to score. Some models
+        # (seen live with NVIDIA's Nemotron, even with thinking mode off)
+        # under-deliver on larger batches instead of erroring, and this was
+        # previously silent: the missing jobs just stayed score=None with
+        # nothing in the logs to explain why. They still get picked up by
+        # the "retryable" dedupe on the next run, but that's cold comfort if
+        # the same job_ids keep getting shortchanged every run - this at
+        # least makes the gap visible instead of a mystery.
+        missing = [j.job_id for j in batch if j.job_id not in results]
+        if missing:
+            print(f"  ! screen batch {n}: model returned {len(results)}/{len(batch)} "
+                  f"results — missing {missing}")
 
         for j in batch:
             r = results.get(j.job_id)
