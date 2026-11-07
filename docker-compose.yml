@@ -1,0 +1,30 @@
+# One-command local run of the full stack: `docker compose up --build`
+# then open http://localhost:3000. Uses SQLite on a named volume - fine for
+# a demo/viva; see docs/DEPLOYMENT.md for a real Postgres-backed deployment.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/.env
+    environment:
+      DATABASE_URL: sqlite:////srv/backend/data/jobhunt.db
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    volumes:
+      - jobhunt_data:/srv/backend/data
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8000
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  jobhunt_data:

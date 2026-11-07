@@ -1,0 +1,36 @@
+name: web app daily run
+
+# Triggers the DEPLOYED backend's scheduled-run endpoint, rather than
+# running the pipeline inside GitHub Actions like daily.yml (the CLI's own
+# workflow) does. The web app is multi-user and the pipeline needs the
+# live database, so the run has to happen on the server that owns that
+# database - this workflow is just the clock that pokes it awake. See
+# docs/DEPLOYMENT.md and backend/app/routers/admin.py.
+#
+# Repository secrets required:
+#   BACKEND_URL         e.g. https://jobhunt-api.onrender.com
+#   ADMIN_RUN_SECRET     must match the backend's ADMIN_RUN_SECRET env var
+
+on:
+  schedule:
+    - cron: "30 0 * * 1-5" # 06:00 IST, weekdays
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /admin/run-scheduled
+        run: |
+          if [ -z "${{ secrets.BACKEND_URL }}" ]; then
+            echo "::error::BACKEND_URL secret is not set - see docs/DEPLOYMENT.md"
+            exit 1
+          fi
+          status=$(curl -s -o response.json -w "%{http_code}" -X POST \
+            "${{ secrets.BACKEND_URL }}/admin/run-scheduled" \
+            -H "X-Admin-Secret: ${{ secrets.ADMIN_RUN_SECRET }}")
+          cat response.json
+          if [ "$status" != "202" ]; then
+            echo "::error::expected HTTP 202, got $status"
+            exit 1
+          fi

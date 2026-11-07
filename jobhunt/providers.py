@@ -1,0 +1,444 @@
+"""Provider-agnostic LLM clients.
+
+One tiny interface, five backends. Screening and drafting each pick their own
+provider from env vars, so you can point the cheap pass at Groq or Gemini and
+keep Anthropic for the expensive drafting pass - or run the whole thing on a free
+tier with no card on file.
+
+    complete(system, user)            -> str   (every provider)
+    complete_document(prompt, pdf)    -> str   (Anthropic + Gemini only)
+
+Nothing here parses JSON or knows what a Job is. That lives in llm.py.
+"""
+from __future__ import annotations
+
+import base64
+import os
+import time
+from typing import Any
+
+import requests
+
+TIMEOUT = 120
+# How long to wait for a connection to be established. An unreachable host
+# should fail fast (and be retried), not sit for the full TIMEOUT.
+CONNECT_TIMEOUT = 10
+# Status codes worth a short retry: rate limits and "busy right now" errors
+# that are usually gone a couple seconds later, as opposed to a real auth or
+# request-shape problem that retrying will never fix.
+RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2.0
+
+
+class LLMError(RuntimeError):
+    """Anything that came back wrong from a provider."""
+
+
+class UnsupportedDocument(LLMError):
+    """Provider cannot read a PDF; caller should fall back to plain text."""
+
+
+class ProviderBusy(LLMError):
+    """Overloaded, rate-limited or unreachable - and still so after every retry.
+
+    Transient, so worth trying again later or on another provider, unlike a
+    bad key or a malformed request. A subclass of LLMError so every existing
+    `except LLMError` keeps working; callers that care can catch it first.
+    """
+
+
+def _http_error(provider: str, r: requests.Response) -> LLMError:
+    cls = ProviderBusy if r.status_code in RETRYABLE_STATUS else LLMError
+    return cls(f"{provider} HTTP {r.status_code}: {r.text[:300]}")
+
+
+def _post_with_retry(url: str, **kwargs: Any) -> requests.Response:
+    """requests.post that rides out a busy provider instead of failing on the
+    first "overloaded" reply.
+
+    "high demand"/rate-limit/503 errors are usually gone within a few seconds,
+    so a short retry means one busy moment on the provider's side doesn't
+    sacrifice a whole screen batch (or a resume upload) to one unlucky request.
+    Network errors (timeout, connection reset) are just as retryable, but
+    requests raises for those instead of returning a status code.
+
+    Only failures that come back quickly are retried: RETRYABLE_STATUS replies
+    and connection errors. A read timeout is not - it already cost the full
+    TIMEOUT, so retrying would just repeat a multi-minute wait (per batch, of
+    a run made of many batches) against a model that is hanging, not busy.
+
+    Returns the last response, which may still be a non-200 for the caller to
+    turn into an LLMError. If the final attempt never got a response at all,
+    that requests.RequestException is re-raised for the caller to wrap.
+    """
+    r = None
+    for attempt in range(RETRY_ATTEMPTS):
+        if attempt:
+            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+        try:
+            r = requests.post(url, timeout=(CONNECT_TIMEOUT, TIMEOUT), **kwargs)
+        except requests.ReadTimeout:
+            raise
+        except requests.RequestException:
+            if attempt == RETRY_ATTEMPTS - 1:
+                raise
+            continue
+        if r.status_code not in RETRYABLE_STATUS:
+            break
+    return r
+
+
+# ---------------------------------------------------------------------------
+
+
+class Provider:
+    name = "base"
+    required_env: str | None = None
+
+    def preflight(self) -> None:
+        """Fail before the first call, not on batch 1 of 40.
+
+        Without this a missing key surfaces as a per-batch warning, every batch
+        fails the same way, and the run ends with an empty digest that reads as
+        "no good jobs today".
+        """
+        if self.required_env:
+            self._env(self.required_env)
+
+    def complete(self, model: str, system: str, user: str, max_tokens: int,
+                 json_mode: bool = False) -> str:
+        """`json_mode` asks the provider to guarantee valid JSON where it can.
+
+        Most providers have a native switch for this. It is a request, not a
+        promise — llm.parse_json still has to cope with whatever comes back.
+        """
+        raise NotImplementedError
+
+    def complete_document(self, model: str, prompt: str, pdf: bytes,
+                          max_tokens: int) -> str:
+        raise UnsupportedDocument(
+            f"{self.name} cannot read PDFs here - pass a .txt/.md resume instead"
+        )
+
+    @staticmethod
+    def _env(key: str) -> str:
+        # An empty value is a missing value. A blank line in .env otherwise
+        # sails past the check and fails much later as an opaque 401.
+        value = (os.environ.get(key) or "").strip()
+        if not value:
+            raise LLMError(f"{key} is not set (see .env.example)")
+        return value
+
+
+class AnthropicProvider(Provider):
+    """Anthropic models via the official SDK."""
+
+    name = "anthropic"
+    required_env = "ANTHROPIC_API_KEY"
+
+    def _client(self):
+        try:
+            from anthropic import Anthropic
+        except ImportError:
+            raise LLMError("pip install anthropic") from None
+        return Anthropic(api_key=self._env("ANTHROPIC_API_KEY"))
+
+    @staticmethod
+    def _text(msg) -> str:
+        return "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+
+    def complete(self, model: str, system: str, user: str, max_tokens: int,
+                 json_mode: bool = False) -> str:
+        # No native JSON switch needed here — the prompts already specify the
+        # shape and the model honours it. json_mode is accepted and ignored.
+        client = self._client()
+        try:
+            msg = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+        except Exception as e:  # anthropic.APIError and friends - never let
+            # a raw SDK exception escape uncaught, or a caller expecting
+            # only LLMError (every other provider's contract) gets a crash
+            # instead of a clean, catchable error.
+            raise LLMError(f"anthropic error: {type(e).__name__}: {e}") from e
+        return self._text(msg)
+
+    def complete_document(self, model: str, prompt: str, pdf: bytes,
+                          max_tokens: int) -> str:
+        client = self._client()
+        try:
+            msg = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": [
+                    {"type": "document", "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": base64.b64encode(pdf).decode(),
+                    }},
+                    {"type": "text", "text": prompt},
+                ]}],
+            )
+        except Exception as e:
+            raise LLMError(f"anthropic error: {type(e).__name__}: {e}") from e
+        return self._text(msg)
+
+
+class GeminiProvider(Provider):
+    """Google AI Studio REST API. Generous free tier, no card needed."""
+
+    name = "gemini"
+    required_env = "GEMINI_API_KEY"
+    BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+    def _post(self, model: str, body: dict) -> str:
+        try:
+            r = _post_with_retry(
+                f"{self.BASE}/{model}:generateContent",
+                params={"key": self._env("GEMINI_API_KEY")},
+                json=body,
+            )
+        except requests.RequestException as e:
+            # Must be wrapped: screen()/draft()'s per-batch/per-job try/except
+            # only catches LLMError, so a raw timeout escaping here used to
+            # kill the *entire run* instead of just this one batch.
+            raise ProviderBusy(f"gemini unreachable: {type(e).__name__}: {e}") from e
+        if r.status_code != 200:
+            raise _http_error("gemini", r)
+        try:
+            candidate = r.json()["candidates"][0]
+        except (KeyError, IndexError, ValueError) as e:
+            raise LLMError(f"gemini returned no candidates: {r.text[:300]}") from e
+
+        # Gemini 2.5+ spends output tokens on internal thinking, so a tight
+        # maxOutputTokens gets consumed before the answer starts. That arrives
+        # as truncated JSON or no parts at all — say so plainly instead of
+        # letting it surface three layers up as a parse error.
+        reason = candidate.get("finishReason")
+        parts = (candidate.get("content") or {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts if "text" in p)
+        if reason == "MAX_TOKENS" or (not text and reason not in (None, "STOP")):
+            raise LLMError(
+                f"gemini stopped early (finishReason={reason}) with "
+                f"{len(text)} chars of output — raise max_tokens for this stage"
+            )
+        if not text:
+            raise LLMError(f"gemini returned no text: {r.text[:300]}")
+        return text
+
+    def complete(self, model: str, system: str, user: str, max_tokens: int,
+                 json_mode: bool = False) -> str:
+        gen: dict[str, Any] = {"maxOutputTokens": max_tokens, "temperature": 0.2}
+        if json_mode:
+            gen["responseMimeType"] = "application/json"
+        body: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "generationConfig": gen,
+        }
+        if system:
+            body["system_instruction"] = {"parts": [{"text": system}]}
+        return self._post(model, body)
+
+    def complete_document(self, model: str, prompt: str, pdf: bytes,
+                          max_tokens: int) -> str:
+        return self._post(model, {
+            "contents": [{"role": "user", "parts": [
+                {"inline_data": {"mime_type": "application/pdf",
+                                 "data": base64.b64encode(pdf).decode()}},
+                {"text": prompt},
+            ]}],
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.2},
+        })
+
+
+class OpenAICompatProvider(Provider):
+    """Anything speaking /chat/completions - Groq, Together, OpenRouter, vLLM."""
+
+    name = "openai-compatible"
+    required_env = "GROQ_API_KEY"
+    default_base = "https://api.groq.com/openai/v1"
+    key_env = "GROQ_API_KEY"
+    # Extra top-level body fields merged into every request - a subclass hook
+    # for provider-specific quirks (see NvidiaProvider) without duplicating
+    # the whole method.
+    extra_body: dict[str, Any] = {}
+
+    def complete(self, model: str, system: str, user: str, max_tokens: int,
+                 json_mode: bool = False) -> str:
+        base = os.getenv("LLM_BASE_URL", self.default_base).rstrip("/")
+        messages = ([{"role": "system", "content": system}] if system else []) + \
+                   [{"role": "user", "content": user}]
+        payload: dict[str, Any] = {"model": model, "messages": messages,
+                                   "max_tokens": max_tokens, "temperature": 0.2,
+                                   **self.extra_body}
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        try:
+            r = _post_with_retry(
+                f"{base}/chat/completions",
+                headers={"Authorization": f"Bearer {self._env(self.key_env)}"},
+                json=payload,
+            )
+        except requests.RequestException as e:
+            # Unlike a non-200 status (handled below), a timeout/connection
+            # error raises instead of returning - previously this escaped
+            # uncaught past screen()/draft()'s per-batch/per-job try/except
+            # (which only catches LLMError) and killed the entire run instead
+            # of just this one batch. Seen live against NVIDIA's API.
+            raise ProviderBusy(f"{self.name} unreachable: {type(e).__name__}: {e}") from e
+        if r.status_code != 200:
+            raise _http_error(self.name, r)
+        try:
+            return r.json()["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, ValueError) as e:
+            raise LLMError(f"{self.name} malformed reply: {r.text[:300]}") from e
+
+
+class GroqProvider(OpenAICompatProvider):
+    name = "groq"
+
+
+class NvidiaProvider(OpenAICompatProvider):
+    """NVIDIA NIM (build.nvidia.com) - same /chat/completions shape as Groq,
+    just a different host and key. Its own subclass (rather than pointing
+    the generic openai-compatible provider at it via LLM_BASE_URL) so the
+    key lives in NVIDIA_API_KEY instead of overloading GROQ_API_KEY."""
+
+    name = "nvidia"
+    required_env = "NVIDIA_API_KEY"
+    default_base = "https://integrate.api.nvidia.com/v1"
+    key_env = "NVIDIA_API_KEY"
+    # NVIDIA's Nemotron models default to "thinking" mode - they prepend a
+    # chain-of-thought preamble as plain prose ahead of the actual reply, in
+    # `content` itself rather than a separate field, which breaks JSON
+    # parsing even with response_format=json_object set. Confirmed live
+    # against the API: disabling it here is what makes screen/draft's JSON
+    # replies parse cleanly.
+    extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+class OllamaProvider(Provider):
+    """Fully local. No key, no cost, no rate limit - just a slower model."""
+
+    name = "ollama"
+
+    def complete(self, model: str, system: str, user: str, max_tokens: int,
+                 json_mode: bool = False) -> str:
+        base = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+        messages = ([{"role": "system", "content": system}] if system else []) + \
+                   [{"role": "user", "content": user}]
+        payload: dict[str, Any] = {
+            "model": model, "messages": messages, "stream": False,
+            "options": {"temperature": 0.2, "num_predict": max_tokens},
+        }
+        if json_mode:
+            payload["format"] = "json"
+        try:
+            r = requests.post(
+                f"{base}/api/chat", json=payload, timeout=TIMEOUT,
+            )
+        except requests.RequestException as e:
+            raise LLMError(
+                f"ollama unreachable at {base} - is `ollama serve` running?") from e
+        if r.status_code != 200:
+            raise LLMError(f"ollama HTTP {r.status_code}: {r.text[:300]}")
+        try:
+            return r.json()["message"]["content"]
+        except (KeyError, ValueError) as e:
+            raise LLMError(f"ollama malformed reply: {r.text[:300]}") from e
+
+
+PROVIDERS = {
+    "anthropic": AnthropicProvider,
+    "gemini": GeminiProvider,
+    "groq": GroqProvider,
+    "nvidia": NvidiaProvider,
+    "openai-compatible": OpenAICompatProvider,
+    "ollama": OllamaProvider,
+}
+
+# What each provider gets if you do not name a model, so `--scorer llm` works
+# after setting nothing but a key.
+DEFAULT_MODELS = {
+    "anthropic": {"screen": "claude-haiku-4-5-20251001", "draft": "claude-sonnet-5"},
+    "gemini": {"screen": "gemini-3.6-flash", "draft": "gemini-3.6-flash"},
+    "groq": {"screen": "llama-3.3-70b-versatile", "draft": "llama-3.3-70b-versatile"},
+    # Screening is many calls/run - the fast MoE model. Drafting is a
+    # handful of calls for the actual cover-note text, where the bigger
+    # model's reasoning is worth the extra latency.
+    "nvidia": {"screen": "nvidia/nemotron-3.5-lightning-30b-a3b", "draft": "nvidia/nemotron-3-super-120b-a12b"},
+    "openai-compatible": {"screen": "gpt-4o-mini", "draft": "gpt-4o"},
+    "ollama": {"screen": "llama3.1", "draft": "llama3.1"},
+}
+
+
+def get_provider(name: str) -> Provider:
+    try:
+        return PROVIDERS[name]()
+    except KeyError:
+        raise LLMError(
+            f"unknown provider {name!r}; pick one of {', '.join(PROVIDERS)}"
+        ) from None
+
+
+def resolve(stage: str, check: bool = True) -> tuple[Provider, str]:
+    """Which provider + model handles this stage ("screen" or "draft")?
+
+    Precedence: stage-specific env var -> global env var -> built-in default.
+    Raises LLMError if the provider's credentials are missing, so the caller
+    can bail before spending anything.
+    """
+    name = (os.getenv(f"{stage.upper()}_PROVIDER")
+            or os.getenv("LLM_PROVIDER")
+            or "anthropic").strip().lower()
+    # Resolve the provider first: a typo'd name should say "unknown provider",
+    # not send you hunting for a model id it was never going to use.
+    provider = get_provider(name)
+    model = (os.getenv(f"{stage.upper()}_MODEL") or "").strip() \
+        or DEFAULT_MODELS.get(name, {}).get(stage)
+    if not model:
+        raise LLMError(f"set {stage.upper()}_MODEL for provider {name!r}")
+    if check:
+        provider.preflight()
+    return provider, model
+
+
+def resolve_backup(stage: str) -> tuple[Provider, str] | None:
+    """An optional second *provider*, for when the primary is down or
+    overloaded for longer than the retries in `_post_with_retry` can ride out.
+
+    Opt in with LLM_BACKUP_PROVIDER (e.g. "gemini"); LLM_BACKUP_MODEL
+    overrides its model. Unlike `resolve`, the model never comes from
+    SCREEN_MODEL/DRAFT_MODEL - those name the *primary's* models and would be
+    meaningless to a different provider.
+
+    Returns None when no backup is configured (or it is the primary itself).
+    Raises LLMError when one is configured but unusable (unknown name, missing
+    key), so a typo is reported instead of silently leaving you unprotected -
+    callers decide whether that is fatal.
+    """
+    name = (os.getenv("LLM_BACKUP_PROVIDER") or "").strip().lower()
+    primary = (os.getenv(f"{stage.upper()}_PROVIDER")
+               or os.getenv("LLM_PROVIDER") or "anthropic").strip().lower()
+    if not name or name == primary:
+        return None
+    provider = get_provider(name)
+    model = (os.getenv("LLM_BACKUP_MODEL") or "").strip() \
+        or DEFAULT_MODELS.get(name, {}).get(stage)
+    if not model:
+        raise LLMError(f"set LLM_BACKUP_MODEL for backup provider {name!r}")
+    provider.preflight()
+    return provider, model
+
+
+def resolve_fallback_model(stage: str) -> str | None:
+    """An optional second model, same provider, to retry with if the primary
+    model's own retries (see _post_with_retry) are exhausted - e.g. a
+    persistently overloaded model where a sibling model on the same account
+    is not. Unset by default; opt in with SCREEN_FALLBACK_MODEL /
+    DRAFT_FALLBACK_MODEL."""
+    return (os.getenv(f"{stage.upper()}_FALLBACK_MODEL") or "").strip() or None

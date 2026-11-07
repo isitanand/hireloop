@@ -1,0 +1,34 @@
+name: keep backend awake
+
+# Render's free tier spins the backend down after ~15 minutes of
+# inactivity, and the first request after that can take 50s+ to wake it
+# back up - annoying mid-demo or mid-search. Pinging /health well inside
+# that window keeps it warm. This is purely a liveness ping (no auth, no
+# side effects) - unrelated to web-daily.yml, which actually triggers a
+# pipeline run.
+#
+# Repository secret required:
+#   BACKEND_URL   e.g. https://hireloop-eb0a.onrender.com (same secret
+#                 web-daily.yml already uses)
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes, always inside Render's 15-minute window
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: GET /health
+        run: |
+          if [ -z "${{ secrets.BACKEND_URL }}" ]; then
+            echo "::error::BACKEND_URL secret is not set - see docs/DEPLOYMENT.md"
+            exit 1
+          fi
+          status=$(curl -s -o response.json -w "%{http_code}" "${{ secrets.BACKEND_URL }}/health")
+          cat response.json
+          if [ "$status" != "200" ]; then
+            echo "::error::expected HTTP 200, got $status"
+            exit 1
+          fi

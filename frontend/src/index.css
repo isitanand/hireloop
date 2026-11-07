@@ -1,0 +1,196 @@
+@import "tailwindcss";
+
+@theme {
+  /* Light is the default palette - @theme's values become :root's values,
+     so no separate :root block is needed for it. Dark overrides these same
+     custom properties further down, either via prefers-color-scheme (no
+     explicit user choice yet) or [data-theme="dark"] (explicit, always wins). */
+  --color-bg: #f7f7f4;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f1ee;
+  --color-surface-raised: #ffffff;
+  --color-line: #e6e6e1;
+  --color-line-soft: #ececE8;
+  --color-text: #17181c;
+  --color-muted: #6b6f76;
+  --color-accent: #4c56e0;
+  --color-accent-dim: #363fb0;
+  --color-accent-soft: #6870e8;
+  --color-warmth: #ff7a4d;
+  --color-good: #15803d;
+  --color-warn: #b45309;
+  --color-bad: #dc2626;
+  --shadow-panel: 0 1px 0 0 rgba(23, 24, 28, 0.02) inset, 0 1px 2px -1px rgba(23, 24, 28, 0.06),
+    0 8px 20px -12px rgba(23, 24, 28, 0.08);
+
+  --font-display: "Inter Tight", "Inter", sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-bg: #0a0b10;
+    --color-surface: #14161d;
+    --color-surface-hover: #1a1d26;
+    --color-surface-raised: #191c24;
+    --color-line: #24272f;
+    --color-line-soft: #1c1f27;
+    --color-text: #eceef2;
+    --color-muted: #8b8fa3;
+    --color-accent: #7c9cff;
+    --color-accent-dim: #5b74c7;
+    --color-accent-soft: #b9c8ff;
+    --color-warmth: #ff9466;
+    --color-good: #3fb950;
+    --color-warn: #d29922;
+    --color-bad: #f85149;
+    --shadow-panel: 0 1px 0 0 rgba(255, 255, 255, 0.02) inset, 0 12px 24px -16px rgba(0, 0, 0, 0.6);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #0a0b10;
+  --color-surface: #14161d;
+  --color-surface-hover: #1a1d26;
+  --color-surface-raised: #191c24;
+  --color-line: #24272f;
+  --color-line-soft: #1c1f27;
+  --color-text: #eceef2;
+  --color-muted: #8b8fa3;
+  --color-accent: #7c9cff;
+  --color-accent-dim: #5b74c7;
+  --color-accent-soft: #b9c8ff;
+  --color-warmth: #ff9466;
+  --color-good: #3fb950;
+  --color-warn: #d29922;
+  --color-bad: #f85149;
+  --shadow-panel: 0 1px 0 0 rgba(255, 255, 255, 0.02) inset, 0 12px 24px -16px rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01" 1;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.015em;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-text);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  .input {
+    width: 100%;
+    border-radius: 0.625rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-line);
+    padding: 0.55rem 0.8rem;
+    font-size: 0.875rem;
+    color: var(--color-text);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+  }
+
+  /* Card surface with a soft, colored elevation instead of a flat border-only
+     look - this + the ambient glow behind the hero is most of what stops the
+     page from reading as a generic Tailwind-template dashboard. Shadow
+     intensity is themed via --shadow-panel so light mode stays subtle
+     (near-flat, bordered) while dark mode keeps real depth. */
+  .panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .glow-bg {
+    background:
+      radial-gradient(600px circle at 15% 0%, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 60%),
+      radial-gradient(500px circle at 85% 10%, color-mix(in srgb, var(--color-warmth) 10%, transparent), transparent 55%);
+  }
+
+  .text-gradient {
+    background: linear-gradient(100deg, var(--color-text) 30%, var(--color-accent-soft) 75%, var(--color-warmth) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .noise-grid {
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--color-line) 70%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--color-line) 70%, transparent) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black 40%, transparent 90%);
+  }
+
+  /* Colored icon chips for stat cards / feature bullets - a fixed small
+     palette so every tint reads as part of one system rather than random
+     per-component colors. Each has its own light/dark-safe bg + fg pair. */
+  /* tint-blue intentionally reuses --color-accent (not its own blue) so the
+     selected sidebar item, the brand logo, and every blue icon chip are the
+     same color everywhere, in both themes. */
+  .tint-blue { background: color-mix(in srgb, var(--color-accent) 16%, transparent); color: var(--color-accent); }
+  .tint-orange { background: color-mix(in srgb, #ff7a4d 16%, transparent); color: #d85f34; }
+  .tint-green { background: color-mix(in srgb, #15803d 16%, transparent); color: #15803d; }
+  .tint-purple { background: color-mix(in srgb, #8b5cf6 16%, transparent); color: #7c3aed; }
+  .tint-bad { background: color-mix(in srgb, var(--color-bad) 16%, transparent); color: var(--color-bad); }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    .tint-orange { color: #ffab84; }
+    .tint-green { color: #6ee0a0; }
+    .tint-purple { color: #c4a5ff; }
+  }
+}
+:root[data-theme="dark"] {
+  .tint-orange { color: #ffab84; }
+  .tint-green { color: #6ee0a0; }
+  .tint-purple { color: #c4a5ff; }
+}
+
+/* Recharts makes bars/slices focusable for a11y and the browser's default
+   focus ring (a thick black rectangle) shows on click - never styled to
+   match the app, so it read as a stray border bug. Tooltips already give
+   hover/click feedback, so the ring adds nothing but noise here. */
+.recharts-wrapper svg *:focus {
+  outline: none;
+}
